@@ -12,7 +12,6 @@
 #include "ros2_livox/livox_points_plugin.h"
 #include "ros2_livox/csv_reader.hpp"
 #include "ros2_livox/livox_ode_multiray_shape.h"
-#include <livox_ros_driver2/msg/custom_msg.hpp>
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
@@ -78,12 +77,6 @@ namespace gazebo
         node->Init(raySensor->WorldName());
         // PointCloud2 publisher
         cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic, 10);
-        // CustomMsg publisher
-        custom_pub = node_->create_publisher<livox_ros_driver2::msg::CustomMsg>(curr_scan_topic + "_CustomMsg", 10);
-        #ifdef DEBUG
-        // Test publisher
-        test_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic + "_test", 10);
-        #endif
 
         scanPub = node->Advertise<msgs::LaserScanStamped>(curr_scan_topic+"laserscan", 50);
 
@@ -147,15 +140,7 @@ namespace gazebo
         msgs::LaserScan *scan = laserMsg.mutable_scan();
         InitializeScan(scan);
 
-        // Create a custom message pp_livox for publishing Livox CustomMsg type messages
-        livox_ros_driver2::msg::CustomMsg pp_livox;
-        pp_livox.header.stamp = node_->get_clock()->now();
-        pp_livox.header.frame_id = raySensor->Name();
-        int count = 0;
-        boost::chrono::high_resolution_clock::time_point start_time = boost::chrono::high_resolution_clock::now();
-
-        #ifdef DEBUG
-        // Create test message
+        // For publishing PointCloud2 type messages
         sensor_msgs::msg::PointCloud2 pcl_msg;
         sensor_msgs::PointCloud2Modifier modifier(pcl_msg);
 
@@ -184,13 +169,6 @@ namespace gazebo
         sensor_msgs::PointCloud2Iterator<float> iter_y(pcl_msg, "y");
         sensor_msgs::PointCloud2Iterator<float> iter_z(pcl_msg, "z");
         sensor_msgs::PointCloud2Iterator<float> iter_intensity(pcl_msg, "intensity");
-        #endif
-
-        // For publishing PointCloud2 type messages
-        sensor_msgs::msg::PointCloud cloud;
-        cloud.header.stamp = node_->get_clock()->now();
-        cloud.header.frame_id = raySensor->Name();
-        auto &clouds = cloud.points;
 
         // Iterate over ray scan point pairs
         for (auto &pair : points_pair)
@@ -215,20 +193,6 @@ namespace gazebo
             auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             auto point = range * axis;
 
-            // Fill the CustomMsg point cloud message
-            livox_ros_driver2::msg::CustomPoint p;
-            p.x = point.X();
-            p.y = point.Y();
-            p.z = point.Z();
-            p.reflectivity = intensity;
-
-            // Fill the PointCloud point cloud message
-            clouds.emplace_back();
-            clouds.back().x = point.X();
-            clouds.back().y = point.Y();
-            clouds.back().z = point.Z();
-
-            #ifdef TEST_MESSAGE
             // Fill test message
             *iter_x = point.X();
             *iter_y = point.Y();
@@ -239,34 +203,12 @@ namespace gazebo
             ++iter_y;
             ++iter_z;
             ++iter_intensity;
-            #endif
-
-            // Calculate timestamp offset
-            boost::chrono::high_resolution_clock::time_point end_time = boost::chrono::high_resolution_clock::now();
-            boost::chrono::nanoseconds elapsed_time = boost::chrono::duration_cast<boost::chrono::nanoseconds>(end_time - start_time);
-            p.offset_time = elapsed_time.count();
-
-            // Add point cloud data to the CustomMsg message
-            pp_livox.points.push_back(p);
-            count++;
         }
 
         if (scanPub && scanPub->HasConnections()) scanPub->Publish(laserMsg);
 
-        // Set the number of point cloud data and publish the CustomMsg message
-        pp_livox.point_num = count;
-        custom_pub->publish(pp_livox);
-
-        // Publish PointCloud2 type message
-        sensor_msgs::msg::PointCloud2 cloud2;
-        sensor_msgs::convertPointCloudToPointCloud2(cloud, cloud2);
-        cloud2.header = cloud.header;
-        cloud2_pub->publish(cloud2);
-
-        #ifdef DEBUG
         // Publish test
-        test_pub->publish(pcl_msg);
-        #endif
+        cloud2_pub->publish(pcl_msg);
     }
 }
 
