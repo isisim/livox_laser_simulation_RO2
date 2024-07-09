@@ -14,6 +14,11 @@
 #include "ros2_livox/livox_ode_multiray_shape.h"
 #include <livox_ros_driver2/msg/custom_msg.hpp>
 
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
+#define TEST_MESSAGE 1
+#define DEBUG 1
+
 namespace gazebo
 {
 
@@ -44,7 +49,7 @@ namespace gazebo
     void LivoxPointsPlugin::Load(gazebo::sensors::SensorPtr _parent, sdf::ElementPtr sdf)
     {
         node_ = gazebo_ros::Node::Get(sdf);
-        
+
         std::vector<std::vector<double>> datas;
         std::string file_name = sdf->Get<std::string>("csv_file_name");
         RCLCPP_INFO(rclcpp::get_logger("LivoxPointsPlugin"), "load csv file name: %s", file_name.c_str());
@@ -72,9 +77,13 @@ namespace gazebo
         node = transport::NodePtr(new transport::Node());
         node->Init(raySensor->WorldName());
         // PointCloud2 publisher
-        cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic + "_PointCloud2", 10);
+        cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic, 10);
         // CustomMsg publisher
-        custom_pub = node_->create_publisher<livox_ros_driver2::msg::CustomMsg>(curr_scan_topic, 10);
+        custom_pub = node_->create_publisher<livox_ros_driver2::msg::CustomMsg>(curr_scan_topic + "_CustomMsg", 10);
+        #ifdef DEBUG
+        // Test publisher
+        test_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic + "_test", 10);
+        #endif
 
         scanPub = node->Advertise<msgs::LaserScanStamped>(curr_scan_topic+"laserscan", 50);
 
@@ -145,6 +154,38 @@ namespace gazebo
         int count = 0;
         boost::chrono::high_resolution_clock::time_point start_time = boost::chrono::high_resolution_clock::now();
 
+        #ifdef DEBUG
+        // Create test message
+        sensor_msgs::msg::PointCloud2 pcl_msg;
+        sensor_msgs::PointCloud2Modifier modifier(pcl_msg);
+
+        modifier.setPointCloud2Fields(4,
+          "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "intensity", 1, sensor_msgs::msg::PointField::FLOAT32
+        );
+
+        // Msg header
+        pcl_msg.header = std_msgs::msg::Header();
+        pcl_msg.header.stamp = node_->get_clock()->now();
+        pcl_msg.header.frame_id = raySensor->Name();
+        pcl_msg.width = points_pair.size();
+        pcl_msg.height = 1;
+        pcl_msg.is_dense = true;
+
+        // Resize pointcloud data
+        pcl_msg.point_step = 16;
+        pcl_msg.row_step = pcl_msg.point_step * pcl_msg.width;
+        pcl_msg.data.resize(pcl_msg.row_step);
+
+        //Iterators for PointCloud msg
+        sensor_msgs::PointCloud2Iterator<float> iter_x(pcl_msg, "x");
+        sensor_msgs::PointCloud2Iterator<float> iter_y(pcl_msg, "y");
+        sensor_msgs::PointCloud2Iterator<float> iter_z(pcl_msg, "z");
+        sensor_msgs::PointCloud2Iterator<float> iter_intensity(pcl_msg, "intensity");
+        #endif
+
         // For publishing PointCloud2 type messages
         sensor_msgs::msg::PointCloud cloud;
         cloud.header.stamp = node_->get_clock()->now();
@@ -187,11 +228,18 @@ namespace gazebo
             clouds.back().y = point.Y();
             clouds.back().z = point.Z();
 
-            // Fill the PointCloud point cloud message
-            clouds.emplace_back();
-            clouds.back().x = point.X();
-            clouds.back().y = point.Y();
-            clouds.back().z = point.Z();
+            #ifdef TEST_MESSAGE
+            // Fill test message
+            *iter_x = point.X();
+            *iter_y = point.Y();
+            *iter_z = point.Z();
+            *iter_intensity = intensity;
+
+            ++iter_x;
+            ++iter_y;
+            ++iter_z;
+            ++iter_intensity;
+            #endif
 
             // Calculate timestamp offset
             boost::chrono::high_resolution_clock::time_point end_time = boost::chrono::high_resolution_clock::now();
@@ -214,6 +262,11 @@ namespace gazebo
         sensor_msgs::convertPointCloudToPointCloud2(cloud, cloud2);
         cloud2.header = cloud.header;
         cloud2_pub->publish(cloud2);
+
+        #ifdef DEBUG
+        // Publish test
+        test_pub->publish(pcl_msg);
+        #endif
     }
 }
 
