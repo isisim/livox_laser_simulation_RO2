@@ -8,11 +8,12 @@
 #include <gazebo/physics/World.hh>
 #include <gazebo/sensors/RaySensor.hh>
 #include <gazebo/transport/Node.hh>
-#include <chrono>
 #include "ros2_livox/livox_points_plugin.h"
 #include "ros2_livox/csv_reader.hpp"
 #include "ros2_livox/livox_ode_multiray_shape.h"
-#include <livox_ros_driver2/msg/custom_msg.hpp>
+
+#include <sensor_msgs/msg/point_cloud2.hpp>
+#include <sensor_msgs/point_cloud2_iterator.hpp>
 
 namespace gazebo
 {
@@ -34,7 +35,7 @@ namespace gazebo
                 avia_infos.emplace_back();
                 avia_infos.back().time = data[0];
                 avia_infos.back().azimuth = data[1] * deg_2_rad;
-                avia_infos.back().zenith = data[2] * deg_2_rad - M_PI_2; //转化成标准的右手系角度
+                avia_infos.back().zenith = data[2] * deg_2_rad - M_PI_2;
             } else {
             RCLCPP_ERROR(rclcpp::get_logger("convertDataToRotateInfo"), "data size is not 3!");
         }
@@ -44,7 +45,7 @@ namespace gazebo
     void LivoxPointsPlugin::Load(gazebo::sensors::SensorPtr _parent, sdf::ElementPtr sdf)
     {
         node_ = gazebo_ros::Node::Get(sdf);
-        
+
         std::vector<std::vector<double>> datas;
         std::string file_name = sdf->Get<std::string>("csv_file_name");
         RCLCPP_INFO(rclcpp::get_logger("LivoxPointsPlugin"), "load csv file name: %s", file_name.c_str());
@@ -72,9 +73,7 @@ namespace gazebo
         node = transport::NodePtr(new transport::Node());
         node->Init(raySensor->WorldName());
         // PointCloud2 publisher
-        cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic + "_PointCloud2", 10);
-        // CustomMsg publisher
-        custom_pub = node_->create_publisher<livox_ros_driver2::msg::CustomMsg>(curr_scan_topic, 10);
+        cloud2_pub = node_->create_publisher<sensor_msgs::msg::PointCloud2>(curr_scan_topic, 10);
 
         scanPub = node->Advertise<msgs::LaserScanStamped>(curr_scan_topic+"laserscan", 50);
 
@@ -138,18 +137,35 @@ namespace gazebo
         msgs::LaserScan *scan = laserMsg.mutable_scan();
         InitializeScan(scan);
 
-        // Create a custom message pp_livox for publishing Livox CustomMsg type messages
-        livox_ros_driver2::msg::CustomMsg pp_livox;
-        pp_livox.header.stamp = node_->get_clock()->now();
-        pp_livox.header.frame_id = raySensor->Name();
-        int count = 0;
-        boost::chrono::high_resolution_clock::time_point start_time = boost::chrono::high_resolution_clock::now();
-
         // For publishing PointCloud2 type messages
-        sensor_msgs::msg::PointCloud cloud;
-        cloud.header.stamp = node_->get_clock()->now();
-        cloud.header.frame_id = raySensor->Name();
-        auto &clouds = cloud.points;
+        sensor_msgs::msg::PointCloud2 pcl_msg;
+        sensor_msgs::PointCloud2Modifier modifier(pcl_msg);
+
+        modifier.setPointCloud2Fields(4,
+          "x", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "y", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "z", 1, sensor_msgs::msg::PointField::FLOAT32,
+          "intensity", 1, sensor_msgs::msg::PointField::FLOAT32
+        );
+
+        // Msg header
+        pcl_msg.header = std_msgs::msg::Header();
+        pcl_msg.header.stamp = node_->get_clock()->now();
+        pcl_msg.header.frame_id = raySensor->Name();
+        pcl_msg.width = points_pair.size();
+        pcl_msg.height = 1;
+        pcl_msg.is_dense = true;
+
+        // Resize pointcloud data
+        pcl_msg.point_step = 16;
+        pcl_msg.row_step = pcl_msg.point_step * pcl_msg.width;
+        pcl_msg.data.resize(pcl_msg.row_step);
+
+        //Iterators for PointCloud msg
+        sensor_msgs::PointCloud2Iterator<float> iter_x(pcl_msg, "x");
+        sensor_msgs::PointCloud2Iterator<float> iter_y(pcl_msg, "y");
+        sensor_msgs::PointCloud2Iterator<float> iter_z(pcl_msg, "z");
+        sensor_msgs::PointCloud2Iterator<float> iter_intensity(pcl_msg, "intensity");
 
         // Iterate over ray scan point pairs
         for (auto &pair : points_pair)
@@ -174,46 +190,22 @@ namespace gazebo
             auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             auto point = range * axis;
 
-            // Fill the CustomMsg point cloud message
-            livox_ros_driver2::msg::CustomPoint p;
-            p.x = point.X();
-            p.y = point.Y();
-            p.z = point.Z();
-            p.reflectivity = intensity;
+            // Fill cloud2 message
+            *iter_x = point.X();
+            *iter_y = point.Y();
+            *iter_z = point.Z();
+            *iter_intensity = intensity;
 
-            // Fill the PointCloud point cloud message
-            clouds.emplace_back();
-            clouds.back().x = point.X();
-            clouds.back().y = point.Y();
-            clouds.back().z = point.Z();
-
-            // Fill the PointCloud point cloud message
-            clouds.emplace_back();
-            clouds.back().x = point.X();
-            clouds.back().y = point.Y();
-            clouds.back().z = point.Z();
-
-            // Calculate timestamp offset
-            boost::chrono::high_resolution_clock::time_point end_time = boost::chrono::high_resolution_clock::now();
-            boost::chrono::nanoseconds elapsed_time = boost::chrono::duration_cast<boost::chrono::nanoseconds>(end_time - start_time);
-            p.offset_time = elapsed_time.count();
-
-            // Add point cloud data to the CustomMsg message
-            pp_livox.points.push_back(p);
-            count++;
+            ++iter_x;
+            ++iter_y;
+            ++iter_z;
+            ++iter_intensity;
         }
 
         if (scanPub && scanPub->HasConnections()) scanPub->Publish(laserMsg);
 
-        // Set the number of point cloud data and publish the CustomMsg message
-        pp_livox.point_num = count;
-        custom_pub->publish(pp_livox);
-
-        // Publish PointCloud2 type message
-        sensor_msgs::msg::PointCloud2 cloud2;
-        sensor_msgs::convertPointCloudToPointCloud2(cloud, cloud2);
-        cloud2.header = cloud.header;
-        cloud2_pub->publish(cloud2);
+        // Publish cloud2
+        cloud2_pub->publish(pcl_msg);
     }
 }
 
