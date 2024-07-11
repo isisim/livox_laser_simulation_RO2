@@ -8,15 +8,12 @@
 #include <gazebo/physics/World.hh>
 #include <gazebo/sensors/RaySensor.hh>
 #include <gazebo/transport/Node.hh>
-#include <chrono>
 #include "ros2_livox/livox_points_plugin.h"
 #include "ros2_livox/csv_reader.hpp"
 #include "ros2_livox/livox_ode_multiray_shape.h"
 
 #include <sensor_msgs/msg/point_cloud2.hpp>
 #include <sensor_msgs/point_cloud2_iterator.hpp>
-#define TEST_MESSAGE 1
-#define DEBUG 1
 
 namespace gazebo
 {
@@ -38,7 +35,7 @@ namespace gazebo
                 avia_infos.emplace_back();
                 avia_infos.back().time = data[0];
                 avia_infos.back().azimuth = data[1] * deg_2_rad;
-                avia_infos.back().zenith = data[2] * deg_2_rad - M_PI_2; //转化成标准的右手系角度
+                avia_infos.back().zenith = data[2] * deg_2_rad - M_PI_2;
             } else {
             RCLCPP_ERROR(rclcpp::get_logger("convertDataToRotateInfo"), "data size is not 3!");
         }
@@ -193,7 +190,7 @@ namespace gazebo
             auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             auto point = range * axis;
 
-            // Fill test message
+            // Fill cloud2 message
             *iter_x = point.X();
             *iter_y = point.Y();
             *iter_z = point.Z();
@@ -207,7 +204,7 @@ namespace gazebo
 
         if (scanPub && scanPub->HasConnections()) scanPub->Publish(laserMsg);
 
-        // Publish test
+        // Publish cloud2
         cloud2_pub->publish(pcl_msg);
     }
 }
