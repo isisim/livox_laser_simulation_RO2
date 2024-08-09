@@ -28,11 +28,6 @@
 
 <link name="${name}">
 <xacro:box_inertia m="${length}" w="${width}" d="${length}" h="${height}"/>
-  <visual>
-        <geometry>
-            <box size="${length} ${width} ${height}"/>
-        </geometry>
-  </visual>
 </link>
 
     <joint name="${name}_joint" type="fixed">
