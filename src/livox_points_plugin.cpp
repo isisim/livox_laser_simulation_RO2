@@ -170,7 +170,7 @@ namespace gazebo
         // Iterate over ray scan point pairs
         for (auto &pair : points_pair)
         {
-            auto range = rayShape->GetRange(pair.first);
+            auto range = rayShape->GetRange(pair.first)+minDist;                // ISISIM added to fix ray length
             auto intensity = rayShape->GetRetro(pair.first);
 
             // Handle out-of-range data
