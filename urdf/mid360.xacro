@@ -36,13 +36,14 @@
       <visual>
         <origin xyz="0 0 -0.047" rpy="0 0 0" />
         <geometry>
-          <mesh filename="file://$(find drc_flexnav_description)/meshes/${robot}/lidar.dae" />
+          <mesh filename="file://$(find ros2_livox_simulation)/meshes/mid360.dae" />
         </geometry>
       </visual>
+      
       <collision>
         <origin xyz="0 0 -0.047" rpy="0 0 0" />
         <geometry>
-          <mesh filename="file://$(find drc_flexnav_description)/meshes/${robot}/lidar.dae" />
+          <mesh filename="file://$(find ros2_livox_simulation)/meshes/mid360.dae" />
         </geometry>
       </collision>
     </link>
