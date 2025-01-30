@@ -17,6 +17,9 @@
 
 namespace gazebo
 {
+    #define TIME_ID 0
+    #define AZIMUTH_ID 1
+    #define ZENITH_ID 2
 
     GZ_REGISTER_SENSOR_PLUGIN(LivoxPointsPlugin)
 
@@ -24,22 +27,65 @@ namespace gazebo
 
     LivoxPointsPlugin::~LivoxPointsPlugin() {}
 
-    void convertDataToRotateInfo(const std::vector<std::vector<double>> &datas, std::vector<AviaRotateInfo> &avia_infos)
+    void convertDataToRotateInfo(const std::vector<std::vector<double>> &datas, std::vector<AviaRotateInfo> &avia_infos, sdf::ElementPtr &scanElem)
     {
         avia_infos.reserve(datas.size());
-        double deg_2_rad = M_PI / 180.0;
+
+        auto horizontalElem = scanElem->GetElement("horizontal");
+        auto min_h_angle = horizontalElem->Get<double>("min_angle");
+        auto max_h_angle = horizontalElem->Get<double>("max_angle");
+        if (min_h_angle>max_h_angle){
+            auto i = min_h_angle;
+            min_h_angle = max_h_angle;
+            max_h_angle = i;
+        }
+        if (min_h_angle < -M_PI) min_h_angle = -M_PI;
+        if (max_h_angle > M_PI) max_h_angle = M_PI;
+
+        auto verticalElem = scanElem->GetElement("vertical");
+        auto min_v_angle = verticalElem->Get<double>("min_angle");
+        auto max_v_angle = verticalElem->Get<double>("max_angle");
+        if (min_v_angle>max_v_angle){
+            auto i = min_v_angle;
+            min_v_angle = max_v_angle;
+            max_v_angle = i;
+        }
+        if (min_v_angle < -M_PI/2) min_v_angle = -M_PI/2;
+        if (max_v_angle > M_PI/2) max_v_angle = M_PI/2;
+
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Limit values: Vertical[%f, %f] - Horizontal[%f,%f]",
+                    min_v_angle,max_v_angle,min_h_angle,max_h_angle);
+        double largest_a = -M_PI;
+        double smallest_a = M_PI;
+        double largest_z = -M_PI/2;
+        double smallest_z = M_PI/2;
+        std::size_t outside_count = 0;
         for (auto &data : datas)
         {
-            if (data.size() == 3)
-            {
-                avia_infos.emplace_back();
-                avia_infos.back().time = data[0];
-                avia_infos.back().azimuth = data[1] * deg_2_rad;
-                avia_infos.back().zenith = data[2] * deg_2_rad - M_PI_2;
+            if (data.size() == 3){
+                if(((max_v_angle >= data[ZENITH_ID])  && (data[ZENITH_ID] >= min_v_angle)) &&
+                   ((max_h_angle >= data[AZIMUTH_ID]) && (data[AZIMUTH_ID] >= min_h_angle))){
+                   avia_infos.emplace_back();
+                   avia_infos.back().time = data[TIME_ID];
+                    // Z upwards, X towards the front and Y to the left
+                   avia_infos.back().azimuth = -data[AZIMUTH_ID];   // Yaw to Euler Z rotation
+                   avia_infos.back().zenith = -data[ZENITH_ID];     // Pitch to Euler Y rotation
+
+                  if(data[ZENITH_ID] > largest_z) largest_z = data[ZENITH_ID];
+                  if(data[ZENITH_ID] < smallest_z)smallest_z= data[ZENITH_ID];
+                  if(data[AZIMUTH_ID]> largest_a) largest_a = data[AZIMUTH_ID];
+                  if(data[AZIMUTH_ID]< smallest_a)smallest_a= data[AZIMUTH_ID];
+                }
+                else{
+                    outside_count++;
+                }
             } else {
-            RCLCPP_ERROR(rclcpp::get_logger("convertDataToRotateInfo"), "data size is not 3!");
+                RCLCPP_ERROR(rclcpp::get_logger("convertDataToRotateInfo"), "data size is not 3!");
+            }
         }
-        }
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Vertical: [%f,%f]",smallest_z,largest_z);
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Horizontal: [%f,%f]",smallest_a,largest_a);
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Outside count: %ld",outside_count);
     }
 
     void LivoxPointsPlugin::Load(gazebo::sensors::SensorPtr _parent, sdf::ElementPtr sdf)
@@ -78,7 +124,7 @@ namespace gazebo
         scanPub = node->Advertise<msgs::LaserScanStamped>(curr_scan_topic+"laserscan", 50);
 
         aviaInfos.clear();
-        convertDataToRotateInfo(datas, aviaInfos);
+        convertDataToRotateInfo(datas, aviaInfos, scanElem);
         RCLCPP_INFO(rclcpp::get_logger("LivoxPointsPlugin"), "scan info size: %ld", aviaInfos.size());
         maxPointSize = aviaInfos.size();
 
