@@ -17,11 +17,11 @@
 
 namespace gazebo
 {
-   struct AviaRotateInfo
+   struct RotateInfo
    {
       double time;
-      double azimuth;
-      double zenith;
+      double z_euler;
+      double y_euler;
    };
 
 
@@ -83,7 +83,7 @@ namespace gazebo
       virtual void OnNewLaserScans();
 
    private:
-      void InitializeRays(std::vector<std::pair<int, AviaRotateInfo>> &points_pair,
+      void InitializeRays(std::vector<std::pair<int, RotateInfo>> &points_pair,
                           boost::shared_ptr<physics::LivoxOdeMultiRayShape> &ray_shape);
 
       void InitializeScan(msgs::LaserScan *&scan);
@@ -99,7 +99,7 @@ namespace gazebo
       transport::NodePtr node;
       msgs::LaserScanStamped laserMsg;
       gazebo::sensors::SensorPtr raySensor;
-      std::vector<AviaRotateInfo> aviaInfos;
+      std::vector<RotateInfo> rotate_infos;
 
       gazebo_ros::Node::SharedPtr node_;
       rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr cloud2_pub;

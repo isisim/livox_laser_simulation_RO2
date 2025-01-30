@@ -17,6 +17,9 @@
 
 namespace gazebo
 {
+    #define TIME_ID 0
+    #define YAW_ID 1
+    #define PITCH_ID 2
 
     GZ_REGISTER_SENSOR_PLUGIN(LivoxPointsPlugin)
 
@@ -24,22 +27,65 @@ namespace gazebo
 
     LivoxPointsPlugin::~LivoxPointsPlugin() {}
 
-    void convertDataToRotateInfo(const std::vector<std::vector<double>> &datas, std::vector<AviaRotateInfo> &avia_infos)
+    void convertDataToRotateInfo(const std::vector<std::vector<double>> &datas, std::vector<RotateInfo> &rotate_info, sdf::ElementPtr &scanElem)
     {
-        avia_infos.reserve(datas.size());
-        double deg_2_rad = M_PI / 180.0;
+        rotate_info.reserve(datas.size());
+
+        auto horizontalElem = scanElem->GetElement("horizontal");
+        auto min_h_angle = horizontalElem->Get<double>("min_angle");
+        auto max_h_angle = horizontalElem->Get<double>("max_angle");
+        if (min_h_angle>max_h_angle){
+            auto i = min_h_angle;
+            min_h_angle = max_h_angle;
+            max_h_angle = i;
+        }
+        if (min_h_angle < -M_PI) min_h_angle = -M_PI;
+        if (max_h_angle > M_PI) max_h_angle = M_PI;
+
+        auto verticalElem = scanElem->GetElement("vertical");
+        auto min_v_angle = verticalElem->Get<double>("min_angle");
+        auto max_v_angle = verticalElem->Get<double>("max_angle");
+        if (min_v_angle>max_v_angle){
+            auto i = min_v_angle;
+            min_v_angle = max_v_angle;
+            max_v_angle = i;
+        }
+        if (min_v_angle < -M_PI/2) min_v_angle = -M_PI/2;
+        if (max_v_angle > M_PI/2) max_v_angle = M_PI/2;
+
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Limit values: Vertical[%f, %f] - Horizontal[%f,%f]",
+                    min_v_angle,max_v_angle,min_h_angle,max_h_angle);
+        double largest_h = -M_PI;
+        double smallest_h = M_PI;
+        double largest_v = -M_PI/2;
+        double smallest_v = M_PI/2;
+        std::size_t outside_count = 0;
         for (auto &data : datas)
         {
-            if (data.size() == 3)
-            {
-                avia_infos.emplace_back();
-                avia_infos.back().time = data[0];
-                avia_infos.back().azimuth = data[1] * deg_2_rad;
-                avia_infos.back().zenith = data[2] * deg_2_rad - M_PI_2;
+            if (data.size() == 3){
+                if(((max_v_angle >= data[PITCH_ID])  && (data[PITCH_ID] >= min_v_angle)) &&
+                   ((max_h_angle >= data[YAW_ID]) && (data[YAW_ID] >= min_h_angle))){
+                   rotate_info.emplace_back();
+                   rotate_info.back().time = data[TIME_ID];
+                    // Z upwards, X towards the front and Y to the left
+                   rotate_info.back().z_euler = -data[YAW_ID];       // Yaw to Euler Z rotation
+                   rotate_info.back().y_euler = -data[PITCH_ID];     // Pitch to Euler Y rotation
+
+                  if(data[PITCH_ID] > largest_v) largest_v = data[PITCH_ID];
+                  if(data[PITCH_ID] < smallest_v)smallest_v= data[PITCH_ID];
+                  if(data[YAW_ID]> largest_h) largest_h = data[YAW_ID];
+                  if(data[YAW_ID]< smallest_h)smallest_h= data[YAW_ID];
+                }
+                else{
+                    outside_count++;
+                }
             } else {
-            RCLCPP_ERROR(rclcpp::get_logger("convertDataToRotateInfo"), "data size is not 3!");
+                RCLCPP_ERROR(rclcpp::get_logger("convertDataToRotateInfo"), "data size is not 3!");
+            }
         }
-        }
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Vertical: [%f,%f]",smallest_v,largest_v);
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Horizontal: [%f,%f]",smallest_h,largest_h);
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Outside count: %ld",outside_count);
     }
 
     void LivoxPointsPlugin::Load(gazebo::sensors::SensorPtr _parent, sdf::ElementPtr sdf)
@@ -77,10 +123,10 @@ namespace gazebo
 
         scanPub = node->Advertise<msgs::LaserScanStamped>(curr_scan_topic+"laserscan", 50);
 
-        aviaInfos.clear();
-        convertDataToRotateInfo(datas, aviaInfos);
-        RCLCPP_INFO(rclcpp::get_logger("LivoxPointsPlugin"), "scan info size: %ld", aviaInfos.size());
-        maxPointSize = aviaInfos.size();
+        rotate_infos.clear();
+        convertDataToRotateInfo(datas, rotate_infos, scanElem);
+        RCLCPP_INFO(rclcpp::get_logger("LivoxPointsPlugin"), "scan info size: %ld", rotate_infos.size());
+        maxPointSize = rotate_infos.size();
 
         RayPlugin::Load(_parent, sdfPtr);
         laserMsg.mutable_scan()->set_frame(_parent->ParentName());
@@ -112,9 +158,9 @@ namespace gazebo
         for (int j = 0; j < samplesStep; j += downSample)
         {
             int index = j % maxPointSize;
-            auto &rotate_info = aviaInfos[index];
+            auto &rotate_info = rotate_infos[index];
             ignition::math::Quaterniond ray;
-            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.y_euler, rotate_info.z_euler));
             auto axis = offset.Rot() * ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             start_point = minDist * axis + offset.Pos();
             end_point = maxDist * axis + offset.Pos();
@@ -127,7 +173,7 @@ namespace gazebo
     // Check if rayShape has been initialized
     if (rayShape)
     {
-        std::vector<std::pair<int, AviaRotateInfo>> points_pair;
+        std::vector<std::pair<int, RotateInfo>> points_pair;
         // Initialize ray scan point pairs
         InitializeRays(points_pair, rayShape);
         rayShape->Update();
@@ -186,7 +232,7 @@ namespace gazebo
             // Calculate point cloud data
             auto rotate_info = pair.second;
             ignition::math::Quaterniond ray;
-            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.y_euler, rotate_info.z_euler));
             auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             auto point = range * axis;
 
@@ -209,7 +255,7 @@ namespace gazebo
     }
 }
 
-    void LivoxPointsPlugin::InitializeRays(std::vector<std::pair<int, AviaRotateInfo>> &points_pair,
+    void LivoxPointsPlugin::InitializeRays(std::vector<std::pair<int, RotateInfo>> &points_pair,
                                            boost::shared_ptr<physics::LivoxOdeMultiRayShape> &ray_shape)
     {
         auto &rays = ray_shape->RayShapes();
@@ -223,8 +269,8 @@ namespace gazebo
         for (int k = currStartIndex; k < end_index; k += downSample)
         {
             auto index = k % maxPointSize;
-            auto &rotate_info = aviaInfos[index];
-            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+            auto &rotate_info = rotate_infos[index];
+             ray.Euler(ignition::math::Vector3d(0.0, rotate_info.y_euler, rotate_info.z_euler));
             auto axis = offset.Rot() * ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             start_point = minDist * axis + offset.Pos();
             end_point = maxDist * axis + offset.Pos();
