@@ -18,8 +18,8 @@
 namespace gazebo
 {
     #define TIME_ID 0
-    #define AZIMUTH_ID 1
-    #define ZENITH_ID 2
+    #define YAW_ID 1
+    #define PITCH_ID 2
 
     GZ_REGISTER_SENSOR_PLUGIN(LivoxPointsPlugin)
 
@@ -55,26 +55,26 @@ namespace gazebo
 
         RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Limit values: Vertical[%f, %f] - Horizontal[%f,%f]",
                     min_v_angle,max_v_angle,min_h_angle,max_h_angle);
-        double largest_a = -M_PI;
-        double smallest_a = M_PI;
-        double largest_z = -M_PI/2;
-        double smallest_z = M_PI/2;
+        double largest_h = -M_PI;
+        double smallest_h = M_PI;
+        double largest_v = -M_PI/2;
+        double smallest_v = M_PI/2;
         std::size_t outside_count = 0;
         for (auto &data : datas)
         {
             if (data.size() == 3){
-                if(((max_v_angle >= data[ZENITH_ID])  && (data[ZENITH_ID] >= min_v_angle)) &&
-                   ((max_h_angle >= data[AZIMUTH_ID]) && (data[AZIMUTH_ID] >= min_h_angle))){
+                if(((max_v_angle >= data[PITCH_ID])  && (data[PITCH_ID] >= min_v_angle)) &&
+                   ((max_h_angle >= data[YAW_ID]) && (data[YAW_ID] >= min_h_angle))){
                    rotate_info.emplace_back();
                    rotate_info.back().time = data[TIME_ID];
                     // Z upwards, X towards the front and Y to the left
-                   rotate_info.back().azimuth = -data[AZIMUTH_ID];   // Yaw to Euler Z rotation
-                   rotate_info.back().zenith = -data[ZENITH_ID];     // Pitch to Euler Y rotation
+                   rotate_info.back().z_euler = -data[YAW_ID];       // Yaw to Euler Z rotation
+                   rotate_info.back().y_euler = -data[PITCH_ID];     // Pitch to Euler Y rotation
 
-                  if(data[ZENITH_ID] > largest_z) largest_z = data[ZENITH_ID];
-                  if(data[ZENITH_ID] < smallest_z)smallest_z= data[ZENITH_ID];
-                  if(data[AZIMUTH_ID]> largest_a) largest_a = data[AZIMUTH_ID];
-                  if(data[AZIMUTH_ID]< smallest_a)smallest_a= data[AZIMUTH_ID];
+                  if(data[PITCH_ID] > largest_v) largest_v = data[PITCH_ID];
+                  if(data[PITCH_ID] < smallest_v)smallest_v= data[PITCH_ID];
+                  if(data[YAW_ID]> largest_h) largest_h = data[YAW_ID];
+                  if(data[YAW_ID]< smallest_h)smallest_h= data[YAW_ID];
                 }
                 else{
                     outside_count++;
@@ -83,8 +83,8 @@ namespace gazebo
                 RCLCPP_ERROR(rclcpp::get_logger("convertDataToRotateInfo"), "data size is not 3!");
             }
         }
-        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Vertical: [%f,%f]",smallest_z,largest_z);
-        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Horizontal: [%f,%f]",smallest_a,largest_a);
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Vertical: [%f,%f]",smallest_v,largest_v);
+        RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Inside Horizontal: [%f,%f]",smallest_h,largest_h);
         RCLCPP_INFO(rclcpp::get_logger("convertDataToRotateInfo"), "Outside count: %ld",outside_count);
     }
 
@@ -160,7 +160,7 @@ namespace gazebo
             int index = j % maxPointSize;
             auto &rotate_info = rotate_infos[index];
             ignition::math::Quaterniond ray;
-            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.y_euler, rotate_info.z_euler));
             auto axis = offset.Rot() * ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             start_point = minDist * axis + offset.Pos();
             end_point = maxDist * axis + offset.Pos();
@@ -232,7 +232,7 @@ namespace gazebo
             // Calculate point cloud data
             auto rotate_info = pair.second;
             ignition::math::Quaterniond ray;
-            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.y_euler, rotate_info.z_euler));
             auto axis = ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             auto point = range * axis;
 
@@ -270,7 +270,7 @@ namespace gazebo
         {
             auto index = k % maxPointSize;
             auto &rotate_info = rotate_infos[index];
-            ray.Euler(ignition::math::Vector3d(0.0, rotate_info.zenith, rotate_info.azimuth));
+             ray.Euler(ignition::math::Vector3d(0.0, rotate_info.y_euler, rotate_info.z_euler));
             auto axis = offset.Rot() * ray * ignition::math::Vector3d(1.0, 0.0, 0.0);
             start_point = minDist * axis + offset.Pos();
             end_point = maxDist * axis + offset.Pos();

@@ -20,8 +20,8 @@ namespace gazebo
    struct RotateInfo
    {
       double time;
-      double azimuth;
-      double zenith;
+      double z_euler;
+      double y_euler;
    };
 
 
