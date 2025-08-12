@@ -58,4 +58,9 @@ Therefore, by subscribing to the `CustomMsg` message, you can use the FAST_LIO a
     
     ![fastlio_pointcloud](docs/fastlio_pointcloud.png)
 
+# Azimuth and Zenith to Pitch and Yaw Converter
 
+This script reads a CSV file containing columns **Azimuth/deg** and **Zenith/deg**, converts these angles to **Pitch** and **Yaw** in radians, and saves the results to a new CSV file.
+
+```bash
+python azimuth_zenith_to_pitch_yaw.py input.csv output.csv
